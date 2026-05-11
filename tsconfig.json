@@ -1,0 +1,72 @@
+{
+  "compilerOptions": {
+    "target": "es2020",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./src/*"],
+      "wagmi": ["./src/shims/wagmi.tsx"],
+      "wagmi/chains": ["./src/shims/wagmi-chains.ts"],
+      "wagmi/connectors": ["./src/shims/wagmi-connectors.ts"],
+      "@rainbow-me/rainbowkit": ["./src/shims/rainbowkit.tsx"],
+      "@rainbow-me/rainbowkit/styles.css": ["./src/shims/empty.css"],
+      "convex/react": ["./src/shims/convex-react.tsx"],
+      "socket.io-client": ["./src/shims/socket-io-client.ts"],
+      "ethers": ["./src/shims/ethers.ts"],
+      "viem": ["./src/shims/viem.ts"],
+      "viem/chains": ["./src/shims/viem-chains.ts"],
+      "axios": ["./src/shims/axios.ts"],
+      "gsap": ["./src/shims/gsap.ts"],
+      "gsap/ScrollTrigger": ["./src/shims/gsap-scroll-trigger.ts"],
+      "three": ["./src/shims/three.ts"],
+      "livekit-client": ["./src/shims/livekit-client.ts"],
+      "@livekit/components-react": ["./src/shims/livekit-components-react.tsx"],
+      "@livekit/components-styles": ["./src/shims/empty.css"],
+      "uuid": ["./src/shims/uuid.ts"],
+      "use-debounce": ["./src/shims/use-debounce.ts"],
+      "react-intersection-observer": ["./src/shims/react-intersection-observer.ts"],
+      "lenis": ["./src/shims/lenis.ts"],
+      "@studio-freight/lenis": ["./src/shims/lenis.ts"],
+      "postprocessing": ["./src/shims/postprocessing.ts"],
+      "@react-jvectormap/world": ["./src/shims/jvectormap-world.ts"],
+      "@react-oauth/google": ["./src/shims/react-oauth-google.tsx"],
+      "@tanstack/react-query": ["./src/shims/tanstack-react-query.tsx"],
+      "@gsap/react": ["./src/shims/gsap-react.ts"],
+      "@react-jvectormap/core": ["./src/shims/jvectormap-core.tsx"],
+      "convex/values": ["./src/shims/convex-values.ts"],
+      "convex/server": ["./src/shims/convex-server.ts"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "convex/nft.ts",
+    "convex/nftReports.ts",
+    "convex/schema.ts"
+  ]
+}

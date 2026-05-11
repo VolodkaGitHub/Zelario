@@ -1,0 +1,528 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Calendar } from "@/components/ui/calendar";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
+import {
+  Coins,
+  Calendar as CalendarIcon,
+  Gift,
+  Trophy,
+  Flame,
+  TrendingUp,
+  Clock,
+  CheckCircle,
+  Target,
+  ArrowRightLeft,
+  Wallet,
+} from "lucide-react";
+import { useDispatch, useSelector } from "react-redux";
+import { RootState } from "@/redux/store";
+import { updateTotalPoints, updateProfile, setProfile } from "@/redux/slices/userProfileSlice";
+import { userApiService } from "@/services/userApiServices";
+import { format, isSameDay } from "date-fns";
+import { useRouter } from "next/navigation";
+
+interface CheckInStatus {
+  hasCheckedInToday: boolean;
+  currentStreak: number;
+  nextCheckInAvailable: Date | null;
+}
+
+interface CheckInCalendarData {
+  date: string;
+  points: number;
+  streakCount: number;
+}
+
+interface PointsHistoryItem {
+  _id: string;
+  type: string;
+  points: number;
+  description: string;
+  createdAt: string;
+}
+
+interface PointsSummary {
+  pointsByType: {
+    daily_checkin: number;
+    referral_bonus: number;
+    quest_reward: number;
+    bonus: number;
+    deduction: number;
+    [key: string]: number;
+  };
+}
+
+interface CheckInCalendarResponse {
+  checkIns: CheckInCalendarData[];
+}
+
+interface PointsHistoryResponse {
+  history: PointsHistoryItem[];
+  summary: PointsSummary;
+  total: number;
+}
+
+export default function PointsPage() {
+  const dispatch = useDispatch();
+  const { profile } = useSelector((state: RootState) => state.userProfile);
+  const router = useRouter();
+  const [checkInStatus, setCheckInStatus] = useState<CheckInStatus | null>(
+    null
+  );
+  const [checkInCalendar, setCheckInCalendar] = useState<CheckInCalendarData[]>(
+    []
+  );
+  const [pointsHistory, setPointsHistory] = useState<PointsHistoryItem[]>([]);
+  const [pointsSummary, setPointsSummary] = useState<PointsSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [checkingIn, setCheckingIn] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotal, setHistoryTotal] = useState(0);
+
+  useEffect(() => {
+    fetchUserProfile(); // Fetch fresh profile data including points
+    fetchCheckInStatus();
+    fetchCheckInCalendar(new Date().getMonth() + 1, new Date().getFullYear());
+    fetchPointsHistory(1);
+  }, []);
+
+  const fetchUserProfile = async () => {
+    try {
+      const result = await userApiService.getProfile();
+      if (result.data) {
+        dispatch(setProfile(result.data));
+      }
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+    }
+  };
+
+  const fetchCheckInStatus = async () => {
+    try {
+      const result = await userApiService.getCheckInStatus();
+      if (result.success) {
+        setCheckInStatus(result.data!);
+      } else {
+        toast.error("Failed to load check-in status");
+      }
+    } catch (error) {
+      toast.error("Error loading check-in data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCheckInCalendar = async (month: number, year: number) => {
+    try {
+      const result = await userApiService.getCheckInCalendar(month, year);
+      if (result.success && result.data) {
+        const data = result.data as unknown as CheckInCalendarResponse;
+        setCheckInCalendar(data.checkIns || []);
+      }
+    } catch (error) {
+      console.error("Error fetching calendar:", error);
+    }
+  };
+
+  const fetchPointsHistory = async (page: number) => {
+    try {
+      const result = await userApiService.getPointsHistory(page, 10);
+      if (result.success && result.data) {
+        const data = result.data as unknown as PointsHistoryResponse;
+        if (page === 1) {
+          setPointsHistory(data.history || []);
+        } else {
+          setPointsHistory((prev) => [...prev, ...(data.history || [])]);
+        }
+        setPointsSummary(data.summary || null);
+        setHistoryTotal(data.total || 0);
+      }
+    } catch (error) {
+      toast.error("Error loading points history");
+    }
+  };
+
+  const performDailyCheckIn = async () => {
+    try {
+      setCheckingIn(true);
+      const result = await userApiService.performDailyCheckIn();
+      if (result.success && result.data) {
+        // Update Redux store with new points, streak, and lastCheckIn
+        const currentPoints = profile?.totalPoints || 0;
+        const newTotalPoints = currentPoints + result.data.pointsAwarded;
+        dispatch(updateTotalPoints(newTotalPoints));
+        // Update dailyCheckin with new streak and lastCheckIn date
+        // Merge with existing dailyCheckin to preserve other properties
+        const updatedDailyCheckin = {
+          ...profile?.dailyCheckin,
+          lastCheckIn: new Date().toISOString(),
+          streak: result.data.streakCount,
+        };
+        dispatch(updateProfile({
+          dailyCheckin: updatedDailyCheckin
+        }));
+
+        toast.success("Daily Check-in Complete!", {
+          description: result.data.message,
+        });
+        // Refresh data
+        await fetchUserProfile(); // Fetch fresh profile to get exact points from server
+        await fetchCheckInStatus();
+        await fetchCheckInCalendar(
+          new Date().getMonth() + 1,
+          new Date().getFullYear()
+        );
+        await fetchPointsHistory(1);
+      } else {
+        toast.error("Check-in Failed", { description: result.error });
+      }
+    } catch (error) {
+      toast.error("Error performing check-in");
+    } finally {
+      setCheckingIn(false);
+    }
+  };
+
+  const getPointTypeIcon = (type: string) => {
+    switch (type) {
+      case "daily_checkin":
+        return <CalendarIcon className="h-4 w-4 text-white" />;
+      case "referral_bonus":
+        return <Gift className="h-4 w-4 text-white" />;
+      case "quest_reward":
+        return <Target className="h-4 w-4 text-white" />;
+      case "bonus":
+        return <Trophy className="h-4 w-4 text-white" />;
+      case "conversion_deduction":
+        return <ArrowRightLeft className="h-4 w-4 text-white" />;
+      case "conversion_refund":
+        return <ArrowRightLeft className="h-4 w-4 text-white" />;
+      default:
+        return <Coins className="h-4 w-4 text-slate-400" />;
+    }
+  };
+
+  const getPointTypeColor = (type: string) => {
+    switch (type) {
+      case "daily_checkin":
+        return "bg-slate-800 text-white border border-white/10";
+      case "referral_bonus":
+        return "bg-slate-800 text-white border border-white/10";
+      case "quest_reward":
+        return "bg-slate-800 text-white border border-white/10";
+      case "bonus":
+        return "bg-slate-800 text-white border border-white/10";
+      case "deduction":
+        return "bg-slate-800 text-white border border-white/10";
+      case "conversion_deduction":
+        return "bg-slate-800 text-white border border-white/10";
+      case "conversion_refund":
+        return "bg-slate-800 text-white border border-white/10";
+      default:
+        return "bg-slate-800 text-slate-300 border border-white/10";
+    }
+  };
+
+  const isCheckInDay = (date: Date) => {
+    return checkInCalendar.some((checkIn) =>
+      isSameDay(new Date(checkIn.date), date)
+    );
+  };
+
+  if (loading) {
+    return <PointsSkeleton />;
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-8">
+      {/* Header */}
+      <div className="text-center space-y-4">
+        <h1 className="text-4xl font-bold text-white">
+          Points & Rewards
+        </h1>
+        <div className="text-6xl font-bold text-white">
+          {profile?.totalPoints || 0}
+        </div>
+        <p className="text-slate-400">Total Points Earned</p>
+
+        {/* Convert Points Button */}
+        <div className="flex justify-center gap-4 mt-6">
+          <Button
+            onClick={() => router.push("/my-profile/points-conversion")}
+            className="bg-white text-black hover:bg-slate-200 px-6 py-3 rounded-lg shadow-lg"
+          >
+            <ArrowRightLeft className="h-5 w-5 mr-2" />
+            Convert to CVC
+          </Button>
+          <Button
+            onClick={() => router.push("/trade/swap")}
+            variant="outline"
+            className="border-white/10 text-white hover:bg-white/10 px-6 py-3"
+          >
+            <Wallet className="h-5 w-5 mr-2" />
+            Buy Crypto
+          </Button>
+        </div>
+      </div>
+
+      {/* Daily Check-in Card */}
+      <Card className="bg-slate-900/50 backdrop-blur-xl border-white/10">
+        <CardHeader>
+          <CardTitle className="text-white text-xl flex items-center gap-3">
+            <Flame className="h-6 w-6 text-orange-400" />
+            Daily Check-in
+            <Badge className="bg-white/10 text-orange-400 border border-white/10">
+              {checkInStatus?.currentStreak || 0} Day Streak
+            </Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="text-center">
+            {checkInStatus?.hasCheckedInToday ? (
+              <div className="space-y-4">
+                <CheckCircle className="h-16 w-16 text-green-400 mx-auto" />
+                <div>
+                  <h3 className="text-xl font-bold text-white">
+                    Already Checked In!
+                  </h3>
+                  <p className="text-slate-400">
+                    Come back tomorrow for your next 10 points
+                  </p>
+                  {checkInStatus.nextCheckInAvailable && (
+                    <p className="text-sm text-slate-300 mt-2">
+                      Next check-in available:{" "}
+                      {format(
+                        new Date(checkInStatus.nextCheckInAvailable),
+                        "MMM dd, yyyy"
+                      )}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <Clock className="h-16 w-16 text-white mx-auto" />
+                <div>
+                  <h3 className="text-xl font-bold text-white">
+                    Ready to Check In!
+                  </h3>
+                  <p className="text-slate-400 mb-4">
+                    Claim your daily 10 points
+                  </p>
+                  <Button
+                    onClick={performDailyCheckIn}
+                    disabled={checkingIn}
+                    className="bg-white text-black hover:bg-slate-200 px-8 py-3 rounded-lg shadow-lg"
+                  >
+                    {checkingIn ? "Checking In..." : "Check In Now"}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Tabs defaultValue="calendar" className="space-y-6">
+        <TabsList className="grid grid-cols-2 w-full bg-slate-900 border border-white/10">
+          <TabsTrigger
+            value="calendar"
+            className="text-slate-400 data-[state=active]:bg-white data-[state=active]:text-black"
+          >
+            Check-in Calendar
+          </TabsTrigger>
+          <TabsTrigger
+            value="history"
+            className="text-slate-400 data-[state=active]:bg-white data-[state=active]:text-black"
+          >
+            Points History
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="calendar">
+          <Card className="bg-slate-900/50 backdrop-blur-xl border-white/10">
+            <CardHeader>
+              <CardTitle className="text-white">Check-in Calendar</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex justify-center">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(date) => date && setSelectedDate(date)}
+                  className="rounded-md border-slate-700"
+                  required={false} // Add this line
+                  modifiers={{
+                    checkedIn: (date: Date) => isCheckInDay(date),
+                  }}
+                  modifiersStyles={{
+                    checkedIn: {
+                      backgroundColor: "rgb(34 197 94)",
+                      color: "white",
+                      fontWeight: "bold",
+                    },
+                  }}
+                />
+              </div>
+              <div className="mt-6 flex justify-center">
+                <div className="flex items-center gap-4 text-sm">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                    <span className="text-slate-300">Checked In</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 bg-slate-600 rounded-full"></div>
+                    <span className="text-slate-300">Not Checked In</span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="history">
+          <Card className="bg-slate-900/50 backdrop-blur-xl border-white/10">
+            <CardHeader>
+              <CardTitle className="text-white">Points History</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {pointsHistory.length === 0 ? (
+                <div className="text-center py-12">
+                  <Coins className="h-16 w-16 text-slate-600 mx-auto mb-4" />
+                  <h3 className="text-xl font-medium text-slate-300 mb-2">
+                    No Points History
+                  </h3>
+                  <p className="text-slate-400">
+                    Start checking in daily to earn points!
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Points Summary */}
+                  {pointsSummary && (
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+                      <div className="bg-slate-800/50 border border-white/10 rounded-lg p-3 text-center">
+                        <div className="text-sm text-slate-300">
+                          Daily Check-in
+                        </div>
+                        <div className="font-bold text-white">
+                          {pointsSummary.pointsByType.daily_checkin}
+                        </div>
+                      </div>
+                      <div className="bg-slate-800/50 border border-white/10 rounded-lg p-3 text-center">
+                        <div className="text-sm text-slate-300">Referrals</div>
+                        <div className="font-bold text-white">
+                          {pointsSummary.pointsByType.referral_bonus}
+                        </div>
+                      </div>
+                      <div className="bg-slate-800/50 border border-white/10 rounded-lg p-3 text-center">
+                        <div className="text-sm text-slate-300">Quests</div>
+                        <div className="font-bold text-white">
+                          {pointsSummary.pointsByType.quest_reward}
+                        </div>
+                      </div>
+                      <div className="bg-slate-800/50 border border-white/10 rounded-lg p-3 text-center">
+                        <div className="text-sm text-slate-300">Bonus</div>
+                        <div className="font-bold text-white">
+                          {pointsSummary.pointsByType.bonus}
+                        </div>
+                      </div>
+                      <div className="bg-slate-800/50 border border-white/10 rounded-lg p-3 text-center">
+                        <div className="text-sm text-slate-300">Deductions</div>
+                        <div className="font-bold text-white">
+                          -{pointsSummary.pointsByType.deduction}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* History List */}
+                  <div className="space-y-3">
+                    {pointsHistory.map((item) => (
+                      <div
+                        key={item._id}
+                        className="flex items-center justify-between p-4 bg-slate-800/30 rounded-lg border border-white/10 hover:bg-slate-800/50 transition-colors"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="p-2 bg-slate-800 rounded-lg">
+                            {getPointTypeIcon(item.type)}
+                          </div>
+                          <div>
+                            <h4 className="text-white font-medium">
+                              {item.description}
+                            </h4>
+                            <p className="text-slate-400 text-sm">
+                              {format(
+                                new Date(item.createdAt),
+                                "MMM dd, yyyy 'at' HH:mm"
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <Badge
+                            className={`${getPointTypeColor(
+                              item.type
+                            )} font-mono`}
+                          >
+                            {item.points > 0 ? "+" : ""}
+                            {item.points}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Load More Button */}
+                  {pointsHistory.length < historyTotal && (
+                    <div className="text-center pt-4">
+                      <Button
+                        onClick={() => {
+                          fetchPointsHistory(historyPage + 1);
+                          setHistoryPage((prev) => prev + 1);
+                        }}
+                        variant="outline"
+                        className="border-white/10 text-white hover:bg-white/10"
+                      >
+                        Load More
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function PointsSkeleton() {
+  return (
+    <div className="max-w-6xl mx-auto space-y-8">
+      <div className="text-center space-y-4">
+        <Skeleton className="h-12 w-64 mx-auto bg-slate-700" />
+        <Skeleton className="h-16 w-32 mx-auto bg-slate-700" />
+        <Skeleton className="h-6 w-40 mx-auto bg-slate-700" />
+      </div>
+
+      <Card className="bg-slate-800/50">
+        <CardHeader>
+          <Skeleton className="h-6 w-48 bg-slate-700" />
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <Skeleton className="h-32 w-full bg-slate-700" />
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

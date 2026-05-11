@@ -1,0 +1,735 @@
+"use client";
+
+import { useState, useEffect, useRef } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import {
+  Users,
+  TrendingUp,
+  Crown,
+  MessageSquare,
+  Trophy,
+  Activity,
+  Sparkles,
+  Star,
+  Clock,
+  UserPlus,
+  BarChart3,
+  Eye,
+  Heart,
+  MessageCircle,
+  Share,
+  Settings,
+  ExternalLink,
+  Send,
+} from "lucide-react";
+import { communityAdminDashboardApiService } from "@/services/communityAdmin/communityAdminDashboardApiService";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { COMMUNITY_ADMIN_ROUTES } from "@/routes";
+import ChainCastJoinButton from "@/components/chainCast/chainCastJoinButton";
+import Image from "next/image";
+
+interface DashboardData {
+  communityOverview: {
+    _id: string;
+    name: string;
+    username: string;
+    description: string;
+    category: string;
+    logo: string;
+    banner: string;
+    memberCount: number;
+    activeMembers: number;
+    isVerified: boolean;
+    settings: {
+      allowChainCast: boolean;
+      allowGroupChat: boolean;
+      allowPosts: boolean;
+      allowQuests: boolean;
+    };
+    socialLinks: Array<{
+      platform: string;
+      url: string;
+    }>;
+  };
+  stats: {
+    totalMembers: number;
+    activeMembers: number;
+    newMembersToday: number;
+    newMembersThisWeek: number;
+    totalPosts: number;
+    postsToday: number;
+    totalLikes: number;
+    totalComments: number;
+    engagementRate: number;
+    growthRate: number;
+  };
+  recentActivity: Array<{
+    id: string;
+    type: string;
+    user: {
+      _id: string;
+      username: string;
+      name: string;
+      profilePic: string;
+      isVerified: boolean;
+    };
+    action: string;
+    timestamp: Date;
+  }>;
+  topMembers: Array<{
+    _id: string;
+    username: string;
+    name: string;
+    profilePic: string;
+    isVerified: boolean;
+    totalPosts: number;
+    totalLikes: number;
+    totalComments: number;
+    questsCompleted: number;
+    joinedAt: Date;
+    role: string;
+    isPremium: boolean;
+  }>;
+}
+
+interface ChatMessage {
+  id: string;
+  user: {
+    _id: string;
+    username: string;
+    name: string;
+    profilePic: string;
+    isVerified: boolean;
+  };
+  text: string;
+  timestamp: Date;
+}
+
+// Mock current user for chat (admin or placeholder)
+const mockCurrentUser = {
+  _id: "admin_id",
+  username: "admin",
+  name: "Admin",
+  profilePic: "/placeholder-admin.jpg",
+  isVerified: true,
+};
+
+export default function CommunityAdminDashboard() {
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const router = useRouter();
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true);
+      const response = await communityAdminDashboardApiService.getDashboardData();
+      if (response.success && response.data) {
+        setDashboardData(response.data);
+      } else {
+        toast.error(response.error || "Failed to fetch dashboard data");
+      }
+    } catch (error: unknown) {
+      console.error("Error fetching dashboard data:", error);
+      toast.error("Failed to fetch dashboard data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getGreeting = () => {
+    const hour = currentTime.getHours();
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
+  };
+
+  const formatNumber = (num: number): string => {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
+    if (num >= 1000) return (num / 1000).toFixed(1) + "K";
+    return num.toString();
+  };
+
+  const formatTimeAgo = (date: Date): string => {
+    const now = new Date();
+    const diff = now.getTime() - new Date(date).getTime();
+    const minutes = Math.floor(diff / 60000);
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  };
+
+  const handleSettingsClick = () => {
+    router.push(COMMUNITY_ADMIN_ROUTES.PROFILE);
+    toast.success("Navigating to Settings...");
+  };
+
+  const handleSocialLinkClick = (url: string) => {
+    window.open(url, "_blank");
+    toast.success(`Opened ${url}`);
+  };
+
+  const handleStatsClick = (type: string) => {
+    const messages = {
+      members: "View Members Analytics",
+      active: "View Activity Report",
+      posts: "View Posts Feed",
+      engagement: "View Engagement Analytics",
+    };
+    toast.info(messages[type as keyof typeof messages]);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center z-50">
+        <div className="text-center space-y-4 animate-pulse">
+          <div className="h-12 w-12 mx-auto rounded-full bg-gradient-to-r from-violet-600 to-indigo-600 animate-spin shadow-lg shadow-violet-500/20"></div>
+          <p className="text-slate-300 text-lg font-medium">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!dashboardData) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center z-50">
+        <div className="text-center space-y-6">
+          <p className="text-slate-300 text-xl font-semibold">Failed to load dashboard data</p>
+          <Button onClick={fetchDashboardData} className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white shadow-lg shadow-violet-500/20">
+            Retry
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen relative z-20">
+      {/* Animated Background */}
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" />
+        <div className="absolute top-1/5 left-1/5 w-96 h-96 bg-violet-500/10 rounded-full blur-[100px] animate-pulse" />
+        <div className="absolute bottom-1/5 right-1/5 w-96 h-96 bg-indigo-500/10 rounded-full blur-[100px] animate-pulse delay-1000" />
+      </div>
+
+      {/* Main Content */}
+      <div className="relative z-20 container mx-auto p-4 sm:p-6 lg:p-8 xl:p-10">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+          {/* Left Side - Chat */}
+          <div className="lg:col-span-4">
+            <ChatComponent
+              communityName={dashboardData.communityOverview.name}
+              activeMembers={dashboardData.communityOverview.activeMembers}
+              recentActivity={dashboardData.recentActivity}
+            />
+          </div>
+
+          {/* Right Side - Community Details */}
+          <div className="lg:col-span-8 space-y-4 sm:space-y-6">
+            {/* Welcome Header */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">
+                  {getGreeting()}! ✨
+                </h1>
+                <p className="text-slate-400 text-base sm:text-lg mt-2 font-light">
+                  Welcome to your {dashboardData.communityOverview.name} dashboard
+                </p>
+              </div>
+              <div className="text-left sm:text-right">
+                <p className="text-sm text-slate-500 font-medium">
+                  {currentTime.toLocaleDateString("en-US", {
+                    weekday: "long",
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                </p>
+                <p className="text-lg font-semibold text-white">
+                  {currentTime.toLocaleTimeString("en-US", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </p>
+              </div>
+            </div>
+
+            {/* Community Overview Card */}
+            <Card className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 shadow-xl overflow-hidden hover:border-slate-700 transition-all duration-300">
+              <div className="relative h-32 sm:h-40 bg-gradient-to-r from-violet-900/50 to-indigo-900/50">
+                {dashboardData.communityOverview.banner && (
+                  <Image
+                    src={dashboardData.communityOverview.banner}
+                    alt="Community Banner"
+                    fill
+                    className="object-cover opacity-80"
+                  />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-r from-gray-900/50 to-transparent" />
+              </div>
+              <CardContent className="p-4 sm:p-6 relative -mt-8">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  <Avatar className="w-16 h-16 sm:w-20 sm:h-20 border-4 border-slate-900 shadow-xl">
+                    <AvatarImage src={dashboardData.communityOverview.logo} alt={dashboardData.communityOverview.name} />
+                    <AvatarFallback className="bg-gradient-to-br from-violet-600 to-indigo-600 text-white text-xl font-bold">
+                      {dashboardData.communityOverview.name.charAt(0)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">{dashboardData.communityOverview.name}</h2>
+                      {dashboardData.communityOverview.isVerified && (
+                        <div className="w-6 h-6 bg-gradient-to-br from-violet-500 to-indigo-500 rounded-full flex items-center justify-center shadow-lg shadow-violet-500/20">
+                          <Star className="w-3.5 h-3.5 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-slate-400 text-sm mb-2">@{dashboardData.communityOverview.username}</p>
+                    <p className="text-slate-300 text-sm sm:text-base mb-4 leading-relaxed font-light">
+                      {dashboardData.communityOverview.description}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-sm text-slate-400">
+                      <div className="flex items-center gap-1">
+                        <Users className="h-4 w-4 text-violet-400" />
+                        <span>{formatNumber(dashboardData.communityOverview.memberCount)} members</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Activity className="h-4 w-4 text-emerald-400" />
+                        <span>{formatNumber(dashboardData.communityOverview.activeMembers)} active</span>
+                      </div>
+                      <Badge className="bg-violet-500/10 text-violet-300 border-violet-500/20 hover:bg-violet-500/20 transition-colors">
+                        {dashboardData.communityOverview.category}
+                      </Badge>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-slate-800/50 border-slate-700 text-slate-300 hover:bg-violet-600 hover:text-white hover:border-violet-600 transition-all duration-300 shadow-md"
+                    onClick={handleSettingsClick}
+                  >
+                    <Settings className="h-4 w-4 mr-2" />
+                    Settings
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Quick Stats */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                {
+                  title: "Total Members",
+                  value: formatNumber(dashboardData.stats.totalMembers),
+                  subValue: `+${dashboardData.stats.newMembersThisWeek} this week`,
+                  icon: Users,
+                  color: "violet-400",
+                  type: "members",
+                },
+                {
+                  title: "Active Today",
+                  value: formatNumber(dashboardData.stats.activeMembers),
+                  subValue: `${((dashboardData.stats.activeMembers / dashboardData.stats.totalMembers) * 100).toFixed(1)}% active`,
+                  icon: Activity,
+                  color: "emerald-400",
+                  type: "active",
+                },
+                {
+                  title: "Posts",
+                  value: formatNumber(dashboardData.stats.totalPosts),
+                  subValue: `+${dashboardData.stats.postsToday} today`,
+                  icon: MessageSquare,
+                  color: "purple-400",
+                  type: "posts",
+                },
+                {
+                  title: "Engagement",
+                  value: `${dashboardData.stats.engagementRate.toFixed(1)}%`,
+                  subValue: `${formatNumber(dashboardData.stats.totalLikes)} likes`,
+                  icon: Heart,
+                  color: "pink-400",
+                  type: "engagement",
+                },
+              ].map((stat) => (
+                <Card
+                  key={stat.title}
+                  className={`bg-slate-900/50 backdrop-blur-xl border border-slate-800 shadow-lg hover:border-violet-500/30 cursor-pointer transition-all duration-300 group`}
+                  onClick={() => handleStatsClick(stat.type)}
+                >
+                  <CardContent className="p-4 sm:p-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-slate-400 text-sm font-medium">{stat.title}</p>
+                        <p className="text-xl sm:text-2xl font-bold text-white mt-1">{stat.value}</p>
+                        <div className="flex items-center gap-1 text-xs mt-1">
+                          <TrendingUp className={`h-3 w-3 text-${stat.color}`} />
+                          <span className={`text-${stat.color} font-medium`}>{stat.subValue}</span>
+                        </div>
+                      </div>
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center bg-${stat.color}/10 group-hover:scale-110 transition-transform duration-300`}>
+                        <stat.icon className={`h-6 w-6 text-${stat.color}`} />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Recent Activity & Top Members */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+              {/* Recent Activity */}
+              <Card className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 shadow-xl">
+                <CardHeader className="border-b border-slate-800 pb-4">
+                  <CardTitle className="text-lg font-semibold text-white flex items-center gap-2">
+                    <Clock className="h-5 w-5 text-violet-400" />
+                    Recent Activity
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <ScrollArea className="h-80">
+                    <div className="p-4 space-y-3">
+                      {dashboardData.recentActivity.map((activity) => (
+                        <div
+                          key={activity.id}
+                          className="flex items-center gap-3 p-3 rounded-lg hover:bg-slate-800/50 transition-all duration-200 cursor-pointer group"
+                          onClick={() => toast.info(`${activity.user.name} ${activity.action}`)}
+                        >
+                          <Avatar className="w-8 h-8 ring-2 ring-slate-800 transition-all group-hover:ring-violet-500/50">
+                            <AvatarImage src={activity.user.profilePic} alt={activity.user.name} />
+                            <AvatarFallback className="bg-gradient-to-br from-violet-600 to-indigo-600 text-white text-xs">
+                              {activity.user.name.charAt(0)?.toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-slate-200 truncate group-hover:text-violet-200 transition-colors">
+                              <span className="font-semibold">{activity.user.name}</span> <span className="text-slate-400 font-light">{activity.action}</span>
+                            </p>
+                            <p className="text-xs text-slate-500">{formatTimeAgo(activity.timestamp)}</p>
+                          </div>
+                          <div className="flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {activity.type === "join" && <UserPlus className="h-4 w-4 text-emerald-400" />}
+                            {activity.type === "post" && <MessageSquare className="h-4 w-4 text-indigo-400" />}
+                            {activity.type === "like" && <Heart className="h-4 w-4 text-rose-400" />}
+                            {activity.type === "comment" && <MessageCircle className="h-4 w-4 text-blue-400" />}
+                          </div>
+                        </div>
+                      ))}
+                      {dashboardData.recentActivity.length === 0 && (
+                        <div className="text-center py-8">
+                          <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                          <p className="text-gray-300">No recent activity</p>
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+
+              {/* Top Members */}
+              <Card className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 shadow-xl">
+                <CardHeader className="border-b border-slate-800 pb-4">
+                  <CardTitle className="text-lg font-semibold text-white flex items-center gap-2">
+                    <Trophy className="h-5 w-5 text-amber-400" />
+                    Top Members
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <ScrollArea className="h-80">
+                    <div className="p-4 space-y-3">
+                      {dashboardData.topMembers.map((member, index) => (
+                        <div
+                          key={member._id}
+                          className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-700/50 transition-all duration-200 cursor-pointer"
+                          onClick={() => toast.info(`View ${member.name}'s profile`)}
+                        >
+                          <div className="flex-shrink-0 w-6 text-center">
+                            <span
+                              className={`text-sm font-bold ${index === 0
+                                ? "text-yellow-400"
+                                : index === 1
+                                  ? "text-gray-300"
+                                  : index === 2
+                                    ? "text-amber-400"
+                                    : "text-gray-400"
+                                }`}
+                            >
+                              #{index + 1}
+                            </span>
+                          </div>
+                          <Avatar className="w-8 h-8 ring-2 ring-slate-800">
+                            <AvatarImage src={member.profilePic} alt={member.name} />
+                            <AvatarFallback className="bg-gradient-to-br from-violet-600 to-indigo-600 text-white text-xs">
+                              {member.name.charAt(0)?.toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-slate-200 truncate group-hover:text-white transition-colors">{member.name}</p>
+                              {member.isPremium && <Crown className="h-3 w-3 text-amber-400" />}
+                              {member.role !== "member" && (
+                                <Badge className="text-xs bg-violet-500/10 text-violet-300 border-violet-500/20">
+                                  {member.role}
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                              <span>{formatNumber(member.totalPosts)} posts</span>
+                              <span>•</span>
+                              <span>{formatNumber(member.totalLikes)} likes</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                      {dashboardData.topMembers.length === 0 && (
+                        <div className="text-center py-8">
+                          <Trophy className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                          <p className="text-gray-300">No member data available</p>
+                        </div>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Community Features */}
+            <Card className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 shadow-xl">
+              <CardHeader className="border-b border-slate-800 pb-4">
+                <CardTitle className="text-lg font-semibold text-white flex items-center gap-2">
+                  <Settings className="h-5 w-5 text-slate-400" />
+                  Community Features
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 sm:p-6">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  {[
+                    {
+                      title: "Posts",
+                      enabled: dashboardData.communityOverview.settings.allowPosts,
+                      icon: MessageSquare,
+                      onClick: () => toast.info("Posts Settings"),
+                    },
+                    {
+                      title: "Group Chat",
+                      enabled: dashboardData.communityOverview.settings.allowGroupChat,
+                      icon: MessageCircle,
+                      onClick: () => toast.info("Group Chat Settings"),
+                    },
+                    {
+                      title: "Quests",
+                      enabled: dashboardData.communityOverview.settings.allowQuests,
+                      icon: Trophy,
+                      onClick: () => toast.info("Quests Settings"),
+                    },
+                    {
+                      title: "ChainCast",
+                      enabled: dashboardData.communityOverview.settings.allowChainCast,
+                      icon: BarChart3,
+                      onClick: () => toast.info("ChainCast Settings"),
+                    },
+                  ].map((feature) => (
+                    <div
+                      key={feature.title}
+                      className={`p-4 rounded-xl border transition-all duration-300 cursor-pointer hover:scale-105 ${feature.enabled
+                        ? "border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/10 hover:border-emerald-500/50"
+                        : "border-slate-800 bg-slate-800/50 hover:bg-slate-800"
+                        }`}
+                      onClick={feature.onClick}
+                    >
+                      <feature.icon
+                        className={`h-6 w-6 mb-2 ${feature.enabled ? "text-emerald-400" : "text-slate-500"}`}
+                      />
+                      <p className="text-sm font-medium text-white">{feature.title}</p>
+                      <p className={`text-xs ${feature.enabled ? "text-emerald-400" : "text-slate-500"}`}>{feature.enabled ? "Enabled" : "Disabled"}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Social Links */}
+            {dashboardData.communityOverview.socialLinks.length > 0 && (
+              <Card className="bg-gray-800/80 backdrop-blur-lg border border-blue-500/30 shadow-lg shadow-blue-500/10">
+                <CardHeader className="border-b border-blue-500/30">
+                  <CardTitle className="text-lg font-semibold text-white flex items-center gap-2">
+                    <ExternalLink className="h-5 w-5 text-blue-400" />
+                    Social Links
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-4 sm:p-6">
+                  <div className="flex flex-wrap gap-3">
+                    {dashboardData.communityOverview.socialLinks.map((link, index) => (
+                      <Button
+                        key={index}
+                        variant="outline"
+                        size="sm"
+                        className="bg-gray-800 border-blue-500/50 text-blue-300 hover:bg-blue-600/20 hover:text-blue-200 transition-all duration-300"
+                        onClick={() => handleSocialLinkClick(link.url)}
+                      >
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        {link.platform}
+                      </Button>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// New ChatComponent: Well-structured chat screen as a separate component
+// Integrates dashboard details like community name, active members, and uses recentActivity as initial messages (transformed to chat-like format)
+function ChatComponent({
+  communityName,
+  activeMembers,
+  recentActivity,
+}: {
+  communityName: string;
+  activeMembers: number;
+  recentActivity: DashboardData["recentActivity"];
+}) {
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    recentActivity.map((activity) => ({
+      id: activity.id,
+      user: activity.user,
+      text: activity.action, // Transform activity action to message text
+      timestamp: activity.timestamp,
+    }))
+  );
+  const [newMessage, setNewMessage] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const handleSendMessage = () => {
+    if (!newMessage.trim()) return;
+
+    const message: ChatMessage = {
+      id: Date.now().toString(),
+      user: mockCurrentUser,
+      text: newMessage,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, message]);
+    setNewMessage("");
+    toast.success("Message sent!");
+    // In a real app, integrate with API for real-time chat
+  };
+
+  return (
+    <Card className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 shadow-xl h-full transition-all duration-300 hover:shadow-2xl flex flex-col">
+      <CardHeader className="border-b border-slate-800 pb-4">
+        <CardTitle className="text-xl font-semibold text-white flex items-center gap-3">
+          <MessageSquare className="h-5 w-5 text-violet-400" />
+          {communityName} Activities
+          <Badge className="ml-auto bg-emerald-500/10 text-emerald-300 border-emerald-500/20">
+            {activeMembers} Active
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0 flex flex-col flex-1">
+        <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+          <div className="space-y-4">
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`flex items-start gap-3 ${msg.user._id === mockCurrentUser._id ? "flex-row-reverse" : ""
+                  }`}
+              >
+                <Avatar className="w-8 h-8">
+                  <AvatarImage src={msg.user.profilePic} alt={msg.user.name} />
+                  <AvatarFallback className="bg-gradient-to-br from-violet-600 to-indigo-600 text-white text-xs">
+                    {msg.user.name.charAt(0)?.toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div
+                  className={`flex flex-col max-w-[80%] ${msg.user._id === mockCurrentUser._id ? "items-end" : "items-start"
+                    }`}
+                >
+                  <div
+                    className={`px-4 py-2 rounded-2xl ${msg.user._id === mockCurrentUser._id
+                      ? "bg-violet-600 text-white"
+                      : "bg-slate-800 text-slate-200"
+                      }`}
+                  >
+                    <p className="text-sm">{msg.text}</p>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {msg.user.name} • {formatTimeAgo(msg.timestamp)}
+                  </p>
+                </div>
+              </div>
+            ))}
+            {messages.length === 0 && (
+              <div className="text-center py-8">
+                <MessageSquare className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-300">No messages yet. Start chatting!</p>
+              </div>
+            )}
+          </div>
+        </ScrollArea>
+        <Separator className="bg-blue-500/30" />
+        <div className="p-4 flex items-center gap-2">
+          <Input
+            placeholder="Type your message..."
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSendMessage();
+              }
+            }}
+            className="flex-1 bg-slate-800/50 border-slate-700 text-white placeholder-slate-500 focus-visible:ring-violet-500"
+          />
+          <Button
+            onClick={handleSendMessage}
+            className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 shadow-lg shadow-violet-500/20"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatTimeAgo(date: Date): string {
+  const now = new Date();
+  const diff = now.getTime() - new Date(date).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}

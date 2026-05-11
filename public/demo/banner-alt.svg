@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" role="img" aria-label="Banner">
+  <defs>
+    <linearGradient id="g" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#312e81"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="400" fill="url(#g)"/>
+  <rect x="80" y="80" width="240" height="240" rx="24" fill="rgba(59,130,246,0.2)"/>
+  <rect x="880" y="40" width="280" height="320" rx="32" fill="rgba(6,182,212,0.15)"/>
+</svg>

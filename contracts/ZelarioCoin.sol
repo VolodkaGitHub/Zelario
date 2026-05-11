@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import "@openzeppelin/contracts@4.9.5/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts@4.9.5/access/Ownable.sol";
+import "@openzeppelin/contracts@4.9.5/security/Pausable.sol";
+
+contract ZelarioCoin is ERC20, Ownable, Pausable {
+    uint256 public constant INITIAL_SUPPLY = 1000000000 * 10**18; // 1 billion ZEL
+    address public constant COMPANY_WALLET = 0xcc5d972Ee1e4abe7d1d6b5FEd1349ae4913cd423;
+
+    // Conversion fee (in wei)
+    uint256 public claimFee = 0.0001 ether; // 0.0001 ETH fee
+
+    // Events
+    event TokensClaimed(address indexed user, uint256 amount, uint256 fee);
+    event ClaimFeeUpdated(uint256 oldFee, uint256 newFee);
+
+    constructor() ERC20("Zelario Coin", "ZEL") {
+        _mint(owner(), INITIAL_SUPPLY);
+    }
+
+    // Function to claim tokens with a small ETH fee
+    function claimTokens(address to, uint256 amount) external payable whenNotPaused {
+        require(msg.value >= claimFee, "Insufficient fee");
+        require(amount > 0, "Amount must be greater than 0");
+        require(balanceOf(owner()) >= amount, "Insufficient tokens in contract");
+
+        // Transfer fee to the company wallet
+        (bool success,) = COMPANY_WALLET.call{value: msg.value}("");
+        require(success, "Fee transfer failed");
+
+        // Transfer tokens from owner to user
+        _transfer(owner(), to, amount);
+
+        emit TokensClaimed(to, amount, msg.value);
+    }
+
+    // Owner-only functions
+    function updateClaimFee(uint256 newFee) external onlyOwner {
+        uint256 oldFee = claimFee;
+        claimFee = newFee;
+        emit ClaimFeeUpdated(oldFee, newFee);
+    }
+
+    function mint(address to, uint256 amount) external onlyOwner {
+        _mint(to, amount);
+    }
+
+    function burn(uint256 amount) external onlyOwner {
+        _burn(msg.sender, amount);
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    // Emergency withdrawal (in case ETH gets stuck in contract)
+    function emergencyWithdraw() external onlyOwner {
+        uint256 balance = address(this).balance;
+        (bool success,) = owner().call{value: balance}("");
+        require(success, "Withdrawal failed");
+    }
+}

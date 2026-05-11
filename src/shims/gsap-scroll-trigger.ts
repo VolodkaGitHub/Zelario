@@ -1,0 +1,1 @@
+export { ScrollTrigger } from "./gsap";

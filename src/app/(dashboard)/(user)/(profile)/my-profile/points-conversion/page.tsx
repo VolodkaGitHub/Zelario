@@ -1,0 +1,861 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { toast } from "sonner";
+import {
+  Coins,
+  ArrowRightLeft,
+  Wallet,
+  TrendingUp,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  RefreshCw,
+  Calculator,
+  Zap
+} from "lucide-react";
+import { useSelector, useDispatch } from "react-redux";
+import { RootState } from "@/redux/store";
+import { updateTotalPoints, setProfile } from "@/redux/slices/userProfileSlice";
+import { pointsConversionApiService, ConversionRate, PointsConversion, ConversionStats } from "@/services/points/pointsConversionApiService";
+import { userApiService } from "@/services/userApiServices";
+import { format } from "date-fns";
+import { useWalletAccount } from "@/hooks/useWalletAccount";
+import { getBrowserSigner } from "@/lib/ethers-wallet";
+import { ethers } from "ethers";
+import TradeNavbar from "@/components/shared/TradeNavbar";
+
+// ZEL token contract ABI (minimal for claimTokens function)
+const ZEL_CONTRACT_ABI = [
+  {
+    inputs: [
+      { internalType: "address", name: "to", type: "address" },
+      { internalType: "uint256", name: "amount", type: "uint256" }
+    ],
+    name: "claimTokens",
+    outputs: [],
+    stateMutability: "payable",
+    type: "function"
+  },
+  {
+    inputs: [],
+    name: "claimFee",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function"
+  }
+] as const;
+
+export default function PointsConversionPage() {
+  const dispatch = useDispatch();
+  const { profile } = useSelector((state: RootState) => state.userProfile);
+  const { account } = useWalletAccount();
+
+  const [conversionRate, setConversionRate] = useState<ConversionRate | null>(null);
+  const [conversions, setConversions] = useState<PointsConversion[]>([]);
+  const [stats, setStats] = useState<ConversionStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [converting, setConverting] = useState(false);
+  const [claiming, setClaiming] = useState(false);
+  const [pointsToConvert, setPointsToConvert] = useState("");
+  const [calculatedCVC, setCalculatedCVC] = useState(0);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [showClaimModal, setShowClaimModal] = useState(false);
+  const [selectedConversion, setSelectedConversion] = useState<PointsConversion | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  useEffect(() => {
+    if (page > 1) {
+      fetchConversions();
+    }
+  }, [page]);
+
+  useEffect(() => {
+    validateAndCalculate();
+  }, [pointsToConvert, conversionRate, profile]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      await Promise.all([
+        fetchConversionRate(),
+        fetchConversions(),
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchConversionRate = async () => {
+    try {
+      const result = await pointsConversionApiService.getCurrentRate();
+      if (result.success && result.data) {
+        setConversionRate(result.data);
+      } else {
+        toast.error("Failed to Load Rate", {
+          description: result.error || "Could not fetch conversion rate. Please refresh.",
+        });
+      }
+    } catch (error) {
+
+      console.error("Fetch rate error:", error);
+      toast.error("Error Loading Data", {
+        description: "Failed to load conversion rate. Please try again.",
+      });
+    }
+  };
+
+  const fetchConversions = async (pageNum = 1) => {
+    try {
+      const result = await pointsConversionApiService.getUserConversions(pageNum, 10);
+      if (result.success && result.data) {
+        if (pageNum === 1) {
+          setConversions(result.data.conversions);
+        } else {
+          setConversions(prev => [...prev, ...result.data!.conversions]);
+        }
+        setStats(result.data.stats);
+        setTotal(result.data.total);
+        setTotalPages(result.data.totalPages);
+      } else {
+        toast.error("Failed to Load Conversions", {
+          description: result.error || "Could not fetch your conversion history.",
+        });
+      }
+    } catch (err) {
+      const error = err as Error;
+      console.error("Fetch conversions error:", error);
+      toast.error("Error Loading History", {
+        description: "Failed to load conversion history. Please try again.",
+      });
+    }
+  };
+
+  const validateAndCalculate = () => {
+    if (!pointsToConvert) {
+      setCalculatedCVC(0);
+      setValidationError(null);
+      return;
+    }
+
+    const points = parseFloat(pointsToConvert);
+
+    // Validations
+    if (isNaN(points) || points <= 0) {
+      setCalculatedCVC(0);
+      setValidationError("Please enter a valid amount greater than 0");
+      return;
+    }
+
+    if (profile && points > profile.totalPoints) {
+      setValidationError(`Insufficient balance. You have ${profile.totalPoints} points.`);
+    } else if (conversionRate && points < conversionRate.minimumPoints) {
+      setValidationError(`Minimum amount is ${conversionRate.minimumPoints} points`);
+    } else {
+      setValidationError(null);
+    }
+
+    if (conversionRate) {
+      const cvc = Math.floor(points / conversionRate.pointsPerCVC);
+      setCalculatedCVC(cvc);
+    }
+  };
+
+  const handleConvertPoints = async () => {
+    if (!pointsToConvert || !conversionRate) {
+      toast.error("Invalid Input", {
+        description: "Please enter a valid amount of points to convert.",
+      });
+      return;
+    }
+
+    const points = parseFloat(pointsToConvert);
+
+    if (points < conversionRate.minimumPoints) {
+      toast.error("Minimum Points Required", {
+        description: `You need at least ${conversionRate.minimumPoints} points to convert.`,
+      });
+      return;
+    }
+
+    if (!profile || profile.totalPoints < points) {
+      toast.error("Insufficient Points", {
+        description: `You only have ${profile?.totalPoints || 0} points available.`,
+      });
+      return;
+    }
+
+    try {
+      setConverting(true);
+      toast.loading("Processing Conversion...", {
+        description: "Submitting your conversion request. Please wait.",
+      });
+
+      const result = await pointsConversionApiService.createConversion(points);
+
+      if (result.success && result.data) {
+        // Fetch fresh profile data to update points
+        const profileResult = await userApiService.getProfile();
+        if (profileResult.data) {
+          dispatch(setProfile(profileResult.data));
+        }
+
+        toast.success("Conversion Request Submitted!", {
+          description: result.data.message,
+          duration: 5000,
+        });
+
+        setPointsToConvert("");
+        setCalculatedCVC(0);
+        await fetchConversions(1);
+        setPage(1);
+      } else {
+        toast.error("Conversion Failed", {
+          description: result.error || "Failed to create conversion request.",
+        });
+      }
+    } catch (err) {
+      const error = err as Error;
+      console.error("Conversion error:", error);
+      toast.error("Conversion Error", {
+        description: error.message || "An unexpected error occurred. Please try again.",
+      });
+    } finally {
+      setConverting(false);
+    }
+  };
+
+  const handleClaimCVC = async (conversion: PointsConversion) => {
+    if (!account?.address) {
+      toast.error("Wallet Not Connected", {
+        description: "Please connect your wallet first to claim ZEL tokens.",
+        action: {
+          label: "Connect",
+          onClick: () => {
+            // Wallet connection is handled by TradeNavbar
+          }
+        }
+      });
+      return;
+    }
+
+    setSelectedConversion(conversion);
+    setShowClaimModal(true);
+  };
+
+  const executeClaimCVC = async () => {
+    if (!selectedConversion || !account?.address || !conversionRate) {
+      toast.error("Missing Information", {
+        description: "Please ensure all required information is available.",
+      });
+      return;
+    }
+
+    // Get contract address from rate or use fallback from config
+    const contractAddress = conversionRate.cvcContractAddress || "0xF7BAdb1aE47768910edDF72cB39bF4C8B30173a8";
+
+    if (!contractAddress || contractAddress === "undefined" || !contractAddress.startsWith("0x")) {
+      toast.error("Invalid Contract Address", {
+        description: "ZEL contract address is not configured. Please contact support.",
+      });
+      return;
+    }
+
+    try {
+      setClaiming(true);
+      toast.loading("Preparing Claim Transaction...", {
+        description: "Please confirm the transaction in your wallet.",
+      });
+
+      const signer = await getBrowserSigner();
+      const contract = new ethers.Contract(contractAddress, ZEL_CONTRACT_ABI, signer);
+
+      let claimFee: bigint;
+      try {
+        claimFee = await contract.claimFee();
+      } catch {
+        claimFee = ethers.parseEther(conversionRate.claimFeeETH);
+      }
+
+      const cvcAmountInWei = ethers.parseUnits(selectedConversion.cvcAmount.toString(), 18);
+
+      toast.loading("Transaction Pending...", {
+        description: "Waiting for blockchain confirmation. This may take a moment.",
+      });
+
+      const tx = await contract.claimTokens(account.address, cvcAmountInWei, { value: claimFee });
+      const receipt = await tx.wait();
+      const txHash = receipt.hash;
+
+      toast.success("Transaction Submitted!", {
+        description: "Your claim transaction has been submitted. Waiting for confirmation...",
+        duration: 3000,
+      });
+
+      // Wait for transaction confirmation
+      toast.loading("Confirming Transaction...", {
+        description: "Waiting for blockchain confirmation.",
+      });
+
+      // Wait a bit for confirmation (in production, you might want to poll)
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Update backend with transaction hash
+      const apiResult = await pointsConversionApiService.claimCVC(
+        selectedConversion.id,
+        account.address,
+        txHash
+      );
+
+      if (apiResult.success) {
+        toast.success("ZEL Claimed Successfully! 🎉", {
+          description: `${selectedConversion.cvcAmount} ZEL tokens have been sent to your wallet.`,
+          duration: 6000,
+          action: {
+            label: "View TX",
+            onClick: () => {
+              window.open(`https://sepolia.etherscan.io/tx/${txHash}`, '_blank');
+            }
+          }
+        });
+
+        setShowClaimModal(false);
+        setSelectedConversion(null);
+        await fetchConversions(1);
+        setPage(1);
+      } else {
+        toast.error("Backend Update Failed", {
+          description: apiResult.error || "Transaction succeeded but failed to update records.",
+        });
+      }
+    } catch (err) {
+      const error = err as Error;
+      console.error("Claim error:", error);
+      // Handle user rejection
+      if (error.message?.includes("rejected") || error.message?.includes("denied")) {
+        toast.error("Transaction Rejected", {
+          description: "You rejected the transaction. Please try again when ready.",
+        });
+      } else if (error.message?.includes("insufficient funds") || error.message?.includes("Insufficient fee")) {
+        toast.error("Insufficient Funds", {
+          description: `You need at least ${conversionRate.claimFeeETH} ETH to pay the claim fee.`,
+        });
+      } else {
+        toast.error("Claim Failed", {
+          description: error.message || "An error occurred while claiming ZEL. Please try again.",
+        });
+      }
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return <Clock className="h-4 w-4 text-white" />;
+      case 'approved':
+        return <CheckCircle className="h-4 w-4 text-white" />;
+      case 'claimed':
+        return <Wallet className="h-4 w-4 text-white" />;
+      case 'rejected':
+        return <XCircle className="h-4 w-4 text-white" />;
+      default:
+        return <Clock className="h-4 w-4 text-slate-400" />;
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return 'bg-slate-800 text-white border border-white/10';
+      case 'approved':
+        return 'bg-slate-800 text-white border border-white/10';
+      case 'claimed':
+        return 'bg-slate-800 text-white border border-white/10';
+      case 'rejected':
+        return 'bg-slate-800 text-white border border-white/10';
+      default:
+        return 'bg-slate-800 text-slate-300 border border-white/10';
+    }
+  };
+
+  if (loading) {
+    return <ConversionSkeleton />;
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-8 relative">
+      {/* Wallet Connection Component */}
+      <TradeNavbar topOffset="top-4" />
+
+      {/* Header */}
+      <div className="text-center space-y-4">
+        <h1 className="text-4xl font-bold text-white">
+          Points to ZEL Conversion
+        </h1>
+        <p className="text-slate-400">Convert your earned points to Zelario Coins</p>
+
+        {conversionRate && (
+          <div className="flex items-center justify-center gap-4 text-sm">
+            <Badge className="bg-slate-800 text-white border border-white/10">
+              1 ZEL = {conversionRate.pointsPerCVC} Points
+            </Badge>
+            <Badge className="bg-slate-800 text-white border border-white/10">
+              Fee: {conversionRate.claimFeeETH} ETH
+            </Badge>
+          </div>
+        )}
+      </div>
+
+      {/* Stats Cards */}
+      {stats && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Card className="bg-slate-900/50 backdrop-blur-xl border-white/10">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-white text-sm font-medium flex items-center gap-2">
+                <ArrowRightLeft className="h-4 w-4 text-white opacity-80" />
+                Total Converted
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-white">{stats.totalPointsConverted}</div>
+              <p className="text-slate-400 text-sm">Points Converted</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-slate-900/50 backdrop-blur-xl border-white/10">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-white text-sm font-medium flex items-center gap-2">
+                <Wallet className="h-4 w-4 text-white opacity-80" />
+                Total Claimed
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-white">{stats.totalCVCClaimed}</div>
+              <p className="text-slate-400 text-sm">ZEL Claimed</p>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-slate-900/50 backdrop-blur-xl border-white/10">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-white text-sm font-medium flex items-center gap-2">
+                <Clock className="h-4 w-4 text-white opacity-80" />
+                Pending
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-white">{stats.pendingConversions}</div>
+              <p className="text-slate-400 text-sm">Awaiting Approval</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <Tabs defaultValue="convert" className="space-y-6">
+        <TabsList className="grid grid-cols-2 w-full bg-slate-900 border border-white/10">
+          <TabsTrigger value="convert" className="text-slate-400 data-[state=active]:bg-white data-[state=active]:text-black">
+            Convert Points
+          </TabsTrigger>
+          <TabsTrigger value="history" className="text-slate-400 data-[state=active]:bg-white data-[state=active]:text-black">
+            Conversion History
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="convert">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Conversion Form */}
+            <Card className="bg-slate-900/50 backdrop-blur-xl border-white/10">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Calculator className="h-5 w-5 text-white opacity-80" />
+                  Convert Points to ZEL
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {!conversionRate?.isActive && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-start space-x-3">
+                    <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-red-300 text-sm">Points conversion is currently disabled</p>
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-300">Points to Convert</label>
+                    <div className="relative">
+                      <Input
+                        type="number"
+                        placeholder="Enter points amount"
+                        value={pointsToConvert}
+                        onChange={(e) => setPointsToConvert(e.target.value)}
+                        className={`bg-slate-700/50 border-slate-600/50 text-white placeholder:text-slate-400 pr-20 ${validationError ? "border-red-500/50 focus-visible:ring-red-500/20" : ""
+                          }`}
+                        disabled={!conversionRate?.isActive || converting}
+                      />
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">
+                        Points
+                      </div>
+                    </div>
+                    {validationError && (
+                      <p className="text-red-400 text-sm flex items-center gap-1.5 mt-1">
+                        <XCircle className="h-3.5 w-3.5" />
+                        {validationError}
+                      </p>
+                    )}
+                    {profile && (
+                      <p className="text-slate-400 text-sm">
+                        Available: {profile.totalPoints} points
+                      </p>
+                    )}
+                  </div>
+
+                  {calculatedCVC > 0 && (
+                    <div className="bg-slate-800/50 rounded-xl p-4 border border-white/10">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-300">You will receive:</span>
+                        <div className="flex items-center gap-2">
+                          <Coins className="h-5 w-5 text-white" />
+                          <span className="text-xl font-bold text-white">{calculatedCVC} ZEL</span>
+                        </div>
+                      </div>
+                      {conversionRate && (
+                        <div className="mt-2 pt-2 border-t border-slate-600/30 space-y-1 text-sm text-slate-400">
+                          <div className="flex justify-between">
+                            <span>Conversion Rate:</span>
+                            <span>{conversionRate.pointsPerCVC} points = 1 ZEL</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Claim Fee:</span>
+                            <span>{conversionRate.claimFeeETH} ETH</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={handleConvertPoints}
+                    disabled={
+                      converting ||
+                      !conversionRate?.isActive ||
+                      !pointsToConvert ||
+                      parseFloat(pointsToConvert) <= 0 ||
+                      calculatedCVC === 0 ||
+                      !!validationError
+                    }
+                    className="w-full bg-white text-black hover:bg-slate-200 font-semibold py-3"
+                  >
+                    {converting ? (
+                      <>
+                        <div className="animate-spin rounded-full h-5 w-5 border-t-2 border-black mr-2"></div>
+                        Creating Conversion...
+                      </>
+                    ) : (
+                      <>
+                        <ArrowRightLeft className="h-5 w-5 mr-2" />
+                        Convert to ZEL
+                      </>
+                    )}
+                  </Button>
+
+                  {conversionRate && (
+                    <div className="text-xs text-slate-400 space-y-1">
+                      <p>• Minimum {conversionRate.minimumPoints} points required</p>
+                      <p>• Minimum {conversionRate.minimumCVC} ZEL output</p>
+                      <p>• Conversions require admin approval</p>
+                      <p>• Additional claim fee applies when withdrawing ZEL</p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Info Card */}
+            <Card className="bg-slate-900/50 backdrop-blur-xl border-white/10">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <Zap className="h-5 w-5 text-white opacity-80" />
+                  How It Works
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">1</div>
+                    <div>
+                      <h4 className="text-white font-medium">Convert Points</h4>
+                      <p className="text-slate-400 text-sm">Submit your points for conversion to ZEL tokens</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">2</div>
+                    <div>
+                      <h4 className="text-white font-medium">Admin Approval</h4>
+                      <p className="text-slate-400 text-sm">Wait for admin to review and approve your conversion</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-white text-black flex items-center justify-center text-sm font-bold">3</div>
+                    <div>
+                      <h4 className="text-white font-medium">Claim ZEL</h4>
+                      <p className="text-slate-400 text-sm">Connect your wallet and claim ZEL tokens (fee applies)</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-800/50 rounded-lg p-4 mt-6 border border-white/10">
+                  <h5 className="text-white font-medium mb-2 flex items-center gap-2">
+                    <TrendingUp className="h-4 w-4 text-white opacity-80" />
+                    Benefits
+                  </h5>
+                  <ul className="text-slate-300 text-sm space-y-1">
+                    <li>• Trade ZEL on exchanges</li>
+                    <li>• Use in DeFi protocols</li>
+                    <li>• Hold as investment</li>
+                    <li>• Future utility features</li>
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="history">
+          <Card className="bg-slate-900/50 backdrop-blur-xl border-white/10">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-5 w-5 text-white opacity-80" />
+                  Conversion History
+                </div>
+                <Button
+                  onClick={() => fetchConversions(1)}
+                  variant="outline"
+                  size="sm"
+                  className="border-white/10 text-white hover:bg-white/10"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {conversions.length === 0 ? (
+                <div className="text-center py-12">
+                  <ArrowRightLeft className="h-16 w-16 text-slate-600 mx-auto mb-4" />
+                  <h3 className="text-xl font-medium text-slate-300 mb-2">No Conversions Yet</h3>
+                  <p className="text-slate-400">Start converting your points to ZEL tokens!</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {conversions.map((conversion) => (
+                    <div
+                      key={conversion.id}
+                      className="flex items-center justify-between p-4 bg-slate-800/30 rounded-lg border border-white/10"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="p-2 bg-slate-800 rounded-lg border border-white/10">
+                          {getStatusIcon(conversion.status)}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-3 mb-1">
+                            <span className="text-white font-medium">
+                              {conversion.pointsConverted} Points → {conversion.cvcAmount} ZEL
+                            </span>
+                            <Badge className={`${getStatusColor(conversion.status)} text-xs`}>
+                              {conversion.status.charAt(0).toUpperCase() + conversion.status.slice(1)}
+                            </Badge>
+                          </div>
+                          <p className="text-slate-400 text-sm">
+                            {format(new Date(conversion.createdAt), "MMM dd, yyyy 'at' HH:mm")}
+                          </p>
+                          {conversion.adminNote && (
+                            <p className="text-slate-300 text-sm mt-1">
+                              Note: {conversion.adminNote}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        {conversion.status === 'approved' && (
+                          <Button
+                            onClick={() => handleClaimCVC(conversion)}
+                            size="sm"
+                            className="bg-white text-black hover:bg-slate-200"
+                          >
+                            <Wallet className="h-4 w-4 mr-2" />
+                            Claim ZEL
+                          </Button>
+                        )}
+                        {conversion.status === 'claimed' && conversion.transactionHash && (
+                          <a
+                            href={`https://sepolia.etherscan.io/tx/${conversion.transactionHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-white opacity-80 hover:opacity-100 text-sm underline"
+                          >
+                            View Transaction
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  {page < totalPages && (
+                    <div className="text-center pt-4">
+                      <Button
+                        onClick={() => setPage(prev => prev + 1)}
+                        variant="outline"
+                        className="border-white/10 text-white hover:bg-white/10"
+                      >
+                        Load More
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Claim Modal */}
+      <Dialog open={showClaimModal} onOpenChange={setShowClaimModal}>
+        <DialogContent className="bg-slate-900 border-slate-700">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <Wallet className="h-5 w-5 text-green-400" />
+              Claim ZEL Tokens
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Claim your approved {selectedConversion?.cvcAmount} ZEL tokens to your connected wallet
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {!account?.address && (
+              <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-yellow-300 font-medium">Wallet Not Connected</p>
+                  <p className="text-yellow-200/70 text-sm mt-1">
+                    Please connect your wallet using the button in the top right corner to proceed with claiming.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {selectedConversion && (
+              <div className="bg-slate-800/50 rounded-lg p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">ZEL Amount:</span>
+                  <span className="text-white font-bold text-lg flex items-center gap-2">
+                    <Coins className="h-5 w-5 text-cyan-400" />
+                    {selectedConversion.cvcAmount} ZEL
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Claim Fee:</span>
+                  <span className="text-white font-semibold">
+                    {conversionRate?.claimFeeETH || selectedConversion.claimFee} ETH
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Wallet Address:</span>
+                  <span className="text-white font-mono text-sm">
+                    {account?.address ? (
+                      <span className="text-green-400">
+                        {account.address.slice(0, 6)}...{account.address.slice(-4)}
+                      </span>
+                    ) : (
+                      <span className="text-red-400">Not Connected</span>
+                    )}
+                  </span>
+                </div>
+                {conversionRate && (
+                  <div className="pt-3 border-t border-slate-700/50">
+                    <p className="text-xs text-slate-400">
+                      The claim fee will be deducted from your wallet balance. Make sure you have sufficient ETH.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowClaimModal(false);
+                  setSelectedConversion(null);
+                }}
+                className="flex-1 border-slate-600 text-slate-300 hover:bg-slate-800"
+                disabled={claiming}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={executeClaimCVC}
+                disabled={claiming || !account?.address}
+                className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold"
+              >
+                {claiming ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-white mr-2"></div>
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Wallet className="h-4 w-4 mr-2" />
+                    Claim ZEL
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function ConversionSkeleton() {
+  return (
+    <div className="max-w-6xl mx-auto space-y-8">
+      <div className="text-center space-y-4">
+        <Skeleton className="h-12 w-96 mx-auto bg-slate-700" />
+        <Skeleton className="h-6 w-64 mx-auto bg-slate-700" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {[...Array(3)].map((_, i) => (
+          <Card key={i} className="bg-slate-800/50">
+            <CardHeader>
+              <Skeleton className="h-5 w-32 bg-slate-700" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-8 w-16 bg-slate-700 mb-2" />
+              <Skeleton className="h-4 w-24 bg-slate-700" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
