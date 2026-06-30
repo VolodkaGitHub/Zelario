@@ -1,0 +1,1 @@
+export const REWARD_AMOUNT = 50;

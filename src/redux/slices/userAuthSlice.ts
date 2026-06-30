@@ -47,8 +47,8 @@ export const userAuthSlice = createSlice({
       state.user = action.payload.user
       if (action.payload.token) {
         state.token = action.payload.token
+        state.isAuthenticated = true
       }
-      state.isAuthenticated = true
       state.tempEmail = null
       state.tempUserData = null
       state.resetToken = null
@@ -56,6 +56,7 @@ export const userAuthSlice = createSlice({
     logout: (state) => {
       state.user = null
       state.isAuthenticated = false
+      state.token = null
       state.tempEmail = null
       state.tempUserData = null
       state.resetToken = null

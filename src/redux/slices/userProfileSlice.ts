@@ -161,6 +161,11 @@ export const userProfileSlice = createSlice({
         state.profile.totalPoints = action.payload;
       }
     },
+    addPoints: (state, action: PayloadAction<number>) => {
+      if (state.profile) {
+        state.profile.totalPoints = (state.profile.totalPoints ?? 0) + action.payload;
+      }
+    },
     updateStreak: (state, action: PayloadAction<number>) => {
       if (state.profile) {
         state.profile.dailyCheckin.streak = action.payload;
@@ -196,6 +201,7 @@ export const {
   appendPointsHistory,
   setPointsSummary,
   updateTotalPoints,
+  addPoints,
   updateStreak,
   clearProfileData,
 } = userProfileSlice.actions;

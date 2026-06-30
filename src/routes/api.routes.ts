@@ -248,6 +248,10 @@ export const USER_API_ROUTES = {
     POINTS_CHECKIN_CALENDAR: '/api/user/points/checkin-calendar',
     POINTS_HISTORY: '/api/user/points/history',
 
+    // Rewards
+    DAILY_LOGIN_STATUS: '/api/rewards/daily-login',
+    DAILY_LOGIN_CLAIM: '/api/rewards/daily-login/claim',
+
     // Community
     COMMUNITY_PROFILE: '/api/user/community/profile',
     COMMUNITY_PROFILE_BY_USERNAME: (username: string) => `/api/user/community/profile/username/${username}`,
